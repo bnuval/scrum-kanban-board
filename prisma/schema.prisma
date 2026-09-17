@@ -51,30 +51,34 @@ enum LinkType {
 }
 
 model Organization {
-  id        String       @id @default(cuid())
+  id        String      @id @default(cuid())
   name      String
-  slug      String       @unique
+  slug      String      @unique
   projects  Project[]
   members   OrgMember[]
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
 }
 
 model User {
-  id             String          @id @default(cuid())
-  email          String          @unique
-  username       String          @unique
-  passwordHash   String
-  name           String?
-  avatarUrl      String?
-  systemRole     SystemRole      @default(USER)
-  orgMemberships OrgMember[]
-  projectMembers ProjectMember[]
-  assignedIssues Issue[]         @relation("Assignee")
-  reportedIssues Issue[]         @relation("Reporter")
-  comments       Comment[]
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id               String          @id @default(cuid())
+  email            String          @unique
+  username         String          @unique
+  passwordHash     String
+  name             String?
+  avatarUrl        String?
+  systemRole       SystemRole      @default(USER)
+  defaultProjectId String?
+  defaultProject   Project?        @relation("UserDefaultProject", fields: [defaultProjectId], references: [id], onDelete: SetNull)
+  orgMemberships   OrgMember[]
+  projectMembers   ProjectMember[]
+  assignedIssues   Issue[]         @relation("Assignee")
+  reportedIssues   Issue[]         @relation("Reporter")
+  comments         Comment[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([defaultProjectId])
 }
 
 model OrgMember {
@@ -103,6 +107,7 @@ model Project {
   issues         Issue[]
   sprints        Sprint[]
   members        ProjectMember[]
+  defaultUsers   User[]          @relation("UserDefaultProject") // 👈 ADD THIS LINE
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
