@@ -1,11 +1,24 @@
-generator client {
-  provider = "prisma-client-js"
-}
-
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum SystemRole {
+  SUPER_ADMIN
+  USER
+}
+
+enum OrgRole {
+  ORG_ADMIN
+  PO
+  SM
+  DEV
+  QA
 }
 
 enum IssueType {
@@ -17,23 +30,17 @@ enum IssueType {
 }
 
 enum IssuePriority {
-  LOWEST
-  LOW
-  MEDIUM
-  HIGH
   HIGHEST
+  HIGH
+  MEDIUM
+  LOW
+  LOWEST
 }
 
 enum SprintStatus {
   PLANNED
   ACTIVE
   COMPLETED
-}
-
-enum ProjectRole {
-  ADMIN
-  MEMBER
-  VIEWER
 }
 
 enum LinkType {
@@ -43,47 +50,80 @@ enum LinkType {
   DUPLICATES
 }
 
+model Organization {
+  id        String       @id @default(cuid())
+  name      String
+  slug      String       @unique
+  projects  Project[]
+  members   OrgMember[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
 model User {
-  id             String          @id @default(uuid())
+  id             String          @id @default(cuid())
   email          String          @unique
+  username       String          @unique
+  passwordHash   String
   name           String?
   avatarUrl      String?
+  systemRole     SystemRole      @default(USER)
+  orgMemberships OrgMember[]
+  projectMembers ProjectMember[]
+  assignedIssues Issue[]         @relation("Assignee")
+  reportedIssues Issue[]         @relation("Reporter")
+  comments       Comment[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
+}
 
-  assignedIssues Issue[]         @relation("IssueAssignee")
-  reportedIssues Issue[]         @relation("IssueReporter")
-  comments       Comment[]
-  memberships    ProjectMember[]
+model OrgMember {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role           OrgRole      @default(DEV)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@index([userId])
 }
 
 model Project {
-  id          String          @id @default(uuid())
-  key         String          @unique
-  name        String
-  description String?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  id             String          @id @default(cuid())
+  key            String          @unique
+  name           String
+  description    String?
+  organizationId String?
+  organization   Organization?   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  columns        Column[]
+  issues         Issue[]
+  sprints        Sprint[]
+  members        ProjectMember[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
-  columns     Column[]
-  sprints     Sprint[]
-  issues      Issue[]
-  members     ProjectMember[]
+  @@index([organizationId])
 }
 
 model ProjectMember {
-  id        String      @id @default(uuid())
-  role      ProjectRole @default(MEMBER)
-  projectId String
-  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id        String   @id @default(cuid())
   userId    String
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
 
-  @@unique([projectId, userId])
+  @@unique([userId, projectId])
+  @@index([projectId])
+  @@index([userId])
 }
 
 model Column {
-  id        String   @id @default(uuid())
+  id        String   @id @default(cuid())
   name      String
   order     Int
   projectId String
@@ -92,11 +132,11 @@ model Column {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([projectId, name])
+  @@index([projectId])
 }
 
 model Sprint {
-  id        String       @id @default(uuid())
+  id        String       @id @default(cuid())
   name      String
   status    SprintStatus @default(PLANNED)
   startDate DateTime?
@@ -106,61 +146,69 @@ model Sprint {
   issues    Issue[]
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
+
+  @@index([projectId])
 }
 
 model Issue {
-  id          String        @id @default(uuid())
-  number      Int           @default(autoincrement())
+  id          String        @id @default(cuid())
   key         String        @unique
+  number      Int           @default(autoincrement())
   title       String
   description String?
-  type        IssueType     @default(TASK)
+  type        IssueType     @default(STORY)
   priority    IssuePriority @default(MEDIUM)
-  order       Float
-  storyPoints Int?
+  order       Float         @default(0)
   isCompleted Boolean       @default(false)
+  storyPoints Int?
 
-  parentId    String?
-  parent      Issue?        @relation("Hierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  children    Issue[]       @relation("Hierarchy")
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  outgoingLinks IssueLink[] @relation("SourceLinks")
-  incomingLinks IssueLink[] @relation("TargetLinks")
+  columnId String
+  column   Column @relation(fields: [columnId], references: [id])
 
-  projectId   String
-  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sprintId String?
+  sprint   Sprint? @relation(fields: [sprintId], references: [id])
 
-  columnId    String
-  column      Column        @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  parentId String?
+  parent   Issue?  @relation("Hierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children Issue[] @relation("Hierarchy")
 
-  sprintId    String?
-  sprint      Sprint?       @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  outgoingLinks IssueLink[] @relation("OutgoingLinks")
+  incomingLinks IssueLink[] @relation("IncomingLinks")
 
-  assigneeId  String?
-  assignee    User?         @relation("IssueAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  reporterId String?
+  reporter   User?   @relation("Reporter", fields: [reporterId], references: [id])
+  assigneeId String?
+  assignee   User?   @relation("Assignee", fields: [assigneeId], references: [id])
 
-  reporterId  String?
-  reporter    User?         @relation("IssueReporter", fields: [reporterId], references: [id], onDelete: SetNull)
+  comments  Comment[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
-  comments    Comment[]
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  @@index([projectId])
+  @@index([columnId])
+  @@index([sprintId])
+  @@index([parentId])
 }
 
 model IssueLink {
-  id        String   @id @default(uuid())
+  id        String   @id @default(cuid())
   type      LinkType @default(RELATES_TO)
   sourceId  String
-  source    Issue    @relation("SourceLinks", fields: [sourceId], references: [id], onDelete: Cascade)
+  source    Issue    @relation("OutgoingLinks", fields: [sourceId], references: [id], onDelete: Cascade)
   targetId  String
-  target    Issue    @relation("TargetLinks", fields: [targetId], references: [id], onDelete: Cascade)
+  target    Issue    @relation("IncomingLinks", fields: [targetId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
   @@unique([sourceId, targetId, type])
+  @@index([sourceId])
+  @@index([targetId])
 }
 
 model Comment {
-  id        String   @id @default(uuid())
+  id        String   @id @default(cuid())
   body      String
   issueId   String
   issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
@@ -168,4 +216,7 @@ model Comment {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([issueId])
+  @@index([userId])
 }
