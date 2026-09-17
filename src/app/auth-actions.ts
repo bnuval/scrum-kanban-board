@@ -6,6 +6,9 @@ import bcrypt from 'bcryptjs'
 import { revalidatePath } from 'next/cache'
 import { OrgRole, SystemRole } from '@prisma/client'
 
+/**
+ * Universal User Login Action
+ */
 export async function loginAction(formData: { usernameOrEmail: string; password: string }) {
   try {
     const user = await prisma.user.findFirst({
@@ -54,12 +57,15 @@ export async function loginAction(formData: { usernameOrEmail: string; password:
   }
 }
 
+/**
+ * User Logout Action
+ */
 export async function logoutAction() {
   await logout()
 }
 
 /**
- * Super Admin: Create Organization
+ * Super Admin Action: Create Organization
  */
 export async function createOrganizationAction(name: string, slug: string) {
   const session = await getSession()
@@ -68,22 +74,32 @@ export async function createOrganizationAction(name: string, slug: string) {
   }
 
   try {
+    const existingOrg = await prisma.organization.findUnique({
+      where: { slug: slug.trim().toLowerCase() },
+    })
+
+    if (existingOrg) {
+      return { success: false, error: 'An organization with this slug already exists.' }
+    }
+
     const org = await prisma.organization.create({
       data: {
         name: name.trim(),
         slug: slug.trim().toLowerCase(),
       },
     })
+
     revalidatePath('/admin')
     return { success: true, org }
   } catch (err: any) {
+    console.error('Create organization error:', err)
     return { success: false, error: err.message || 'Failed to create organization' }
   }
 }
 
 /**
- * Super Admin: Provision Org Admin (SM / Project Manager)
- * RULE: No one is allowed to create another SUPER_ADMIN.
+ * Super Admin Action: Provision Organization Admin (SM / Project Manager)
+ * STRICT RULE: Always creates a USER with role ORG_ADMIN. Cannot create another SUPER_ADMIN.
  */
 export async function provisionOrgAdminAction(data: {
   username: string
@@ -98,6 +114,19 @@ export async function provisionOrgAdminAction(data: {
   }
 
   try {
+    const existing = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: data.username.trim() },
+          { email: data.email.trim().toLowerCase() },
+        ],
+      },
+    })
+
+    if (existing) {
+      return { success: false, error: 'A user with this username or email already exists.' }
+    }
+
     const hash = await bcrypt.hash(data.password, 10)
 
     const user = await prisma.user.create({
@@ -106,7 +135,7 @@ export async function provisionOrgAdminAction(data: {
         email: data.email.trim().toLowerCase(),
         passwordHash: hash,
         name: data.name.trim(),
-        systemRole: SystemRole.USER, // STRICT: Always USER, never SUPER_ADMIN
+        systemRole: SystemRole.USER,
       },
     })
 
@@ -114,19 +143,20 @@ export async function provisionOrgAdminAction(data: {
       data: {
         userId: user.id,
         organizationId: data.organizationId,
-        role: OrgRole.ORG_ADMIN, // Assigned as the Org Lead / SM
+        role: OrgRole.ORG_ADMIN,
       },
     })
 
     revalidatePath('/admin')
     return { success: true }
   } catch (err: any) {
+    console.error('Provisioning Org Admin error:', err)
     return { success: false, error: err.message || 'Failed to provision Organization Admin' }
   }
 }
 
 /**
- * Org Admin (SM / PM): Provision team members inside their own Organization (PO, SM, DEV, QA)
+ * Org Admin (SM / PM) Action: Provision team members (PO, SM, DEV, QA) within their own organization
  */
 export async function provisionTeamMemberAction(data: {
   username: string
@@ -141,6 +171,19 @@ export async function provisionTeamMemberAction(data: {
   }
 
   try {
+    const existing = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: data.username.trim() },
+          { email: data.email.trim().toLowerCase() },
+        ],
+      },
+    })
+
+    if (existing) {
+      return { success: false, error: 'A user with this username or email already exists.' }
+    }
+
     const hash = await bcrypt.hash(data.password, 10)
 
     const user = await prisma.user.create({
@@ -164,12 +207,13 @@ export async function provisionTeamMemberAction(data: {
     revalidatePath('/')
     return { success: true }
   } catch (err: any) {
+    console.error('Provisioning team member error:', err)
     return { success: false, error: err.message || 'Failed to provision team member' }
   }
 }
 
 /**
- * Org Admin (SM / PM): Create a new Board / Project for their Organization
+ * Org Admin (SM / PM) Action: Create a new Board / Project for their Organization
  */
 export async function createProjectBoardAction(name: string, key: string) {
   const session = await getSession()
@@ -178,10 +222,20 @@ export async function createProjectBoardAction(name: string, key: string) {
   }
 
   try {
+    const cleanKey = key.trim().toUpperCase()
+
+    const existingProject = await prisma.project.findUnique({
+      where: { key: cleanKey },
+    })
+
+    if (existingProject) {
+      return { success: false, error: `A project with key "${cleanKey}" already exists.` }
+    }
+
     const project = await prisma.project.create({
       data: {
         name: name.trim(),
-        key: key.trim().toUpperCase(),
+        key: cleanKey,
         organizationId: session.orgId,
         columns: {
           create: [
@@ -205,6 +259,7 @@ export async function createProjectBoardAction(name: string, key: string) {
     revalidatePath('/')
     return { success: true, project }
   } catch (err: any) {
+    console.error('Create project board error:', err)
     return { success: false, error: err.message || 'Failed to create board' }
   }
 }
