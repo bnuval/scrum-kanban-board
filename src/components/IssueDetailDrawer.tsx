@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { X, Send, MessageSquare, Lock, Save, CheckCircle2 } from 'lucide-react'
+import { X, Send, MessageSquare, Lock, Save, CheckCircle2, Share2, Check } from 'lucide-react'
 import { updateIssueDetails, addComment } from '@/app/actions'
 import { IssuePriority } from '@prisma/client'
 
@@ -44,6 +44,7 @@ export default function IssueDetailDrawer({
   const [isSaving, setIsSaving] = useState(false)
   const [isSubmittingComment, setIsSubmittingComment] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     if (issue) {
@@ -57,6 +58,14 @@ export default function IssueDetailDrawer({
   }, [issue, columns])
 
   if (!issue) return null
+
+  const handleCopyLink = () => {
+    if (typeof window !== 'undefined') {
+      navigator.clipboard.writeText(window.location.href)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
 
   const handleSaveChanges = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
@@ -111,7 +120,7 @@ export default function IssueDetailDrawer({
 
   return (
     <div className="fixed inset-y-0 right-0 z-50 w-full max-w-xl bg-white shadow-2xl border-l border-slate-200 flex flex-col">
-      {/* Drawer Header */}
+      {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50/50">
         <div className="flex items-center gap-2">
           <span className="font-mono text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
@@ -132,6 +141,25 @@ export default function IssueDetailDrawer({
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleCopyLink}
+            title="Copy ticket URL"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-600 hover:bg-slate-200 border border-slate-200 transition cursor-pointer"
+          >
+            {copied ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="text-emerald-700">Copied</span>
+              </>
+            ) : (
+              <>
+                <Share2 className="w-3.5 h-3.5 text-slate-500" />
+                <span>Share</span>
+              </>
+            )}
+          </button>
+
           {!isReadOnly && (
             <button
               type="button"
@@ -150,6 +178,7 @@ export default function IssueDetailDrawer({
               )}
             </button>
           )}
+
           <button
             type="button"
             onClick={onClose}
@@ -160,9 +189,8 @@ export default function IssueDetailDrawer({
         </div>
       </div>
 
-      {/* Drawer Form Body */}
+      {/* Form Body */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* Title Input */}
         <div>
           <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
             Summary / Title
@@ -180,7 +208,6 @@ export default function IssueDetailDrawer({
           )}
         </div>
 
-        {/* Description Field */}
         <div>
           <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
             Description
@@ -200,9 +227,7 @@ export default function IssueDetailDrawer({
           )}
         </div>
 
-        {/* Metadata Controls */}
         <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs">
-          {/* Status Column */}
           <div>
             <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Status</label>
             {isReadOnly ? (
@@ -224,7 +249,6 @@ export default function IssueDetailDrawer({
             )}
           </div>
 
-          {/* Priority */}
           <div>
             <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Priority</label>
             {isReadOnly ? (
@@ -244,7 +268,6 @@ export default function IssueDetailDrawer({
             )}
           </div>
 
-          {/* Story Points */}
           <div>
             <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Story Points</label>
             {isReadOnly ? (
@@ -262,7 +285,6 @@ export default function IssueDetailDrawer({
             )}
           </div>
 
-          {/* Assignee */}
           <div>
             <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Assignee</label>
             {isReadOnly ? (
@@ -286,7 +308,7 @@ export default function IssueDetailDrawer({
           </div>
         </div>
 
-        {/* Comments Section */}
+        {/* Comments */}
         <div className="space-y-4 pt-4 border-t border-slate-200">
           <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
             <MessageSquare className="w-4 h-4 text-blue-600" /> Comments & Activity

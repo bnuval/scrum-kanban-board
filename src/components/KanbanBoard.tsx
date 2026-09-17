@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo, Suspense } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd'
 import {
   CheckCircle2,
@@ -125,13 +125,16 @@ function KanbanBoardContent({
   isReadOnly = false,
 }: KanbanBoardProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   const [issues, setIssues] = useState<Issue[]>(initialIssues)
   const [activeCollaborators, setActiveCollaborators] = useState<PresenceUser[]>([])
   const [collapsedEpics, setCollapsedEpics] = useState<Record<string, boolean>>({})
   const [isMounted, setIsMounted] = useState(false)
 
-  const [selectedIssueKey, setSelectedIssueKey] = useState<string | null>(null)
+  // Initialize selected issue key from URL if provided
+  const initialIssueKey = searchParams.get('selectedIssue')
+  const [selectedIssueKey, setSelectedIssueKey] = useState<string | null>(initialIssueKey)
 
   const [searchQuery, setSearchQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<string>('ALL')
@@ -146,6 +149,34 @@ function KanbanBoardContent({
   useEffect(() => {
     setIssues(initialIssues)
   }, [initialIssues])
+
+  // Sync state if URL search parameters change externally
+  useEffect(() => {
+    const key = searchParams.get('selectedIssue')
+    if (key) {
+      setSelectedIssueKey(key)
+    }
+  }, [searchParams])
+
+  // Open drawer instantly and update URL without triggering a server re-render
+  const handleOpenDrawer = (key: string) => {
+    setSelectedIssueKey(key)
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href)
+      url.searchParams.set('selectedIssue', key)
+      window.history.replaceState({}, '', url.toString())
+    }
+  }
+
+  // Close drawer and remove ticket parameter from URL without triggering a page reload
+  const handleCloseDrawer = () => {
+    setSelectedIssueKey(null)
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('selectedIssue')
+      window.history.replaceState({}, '', url.toString())
+    }
+  }
 
   useEffect(() => {
     const currentUser = users.find((u) => u.id === currentUserId) || {
@@ -225,14 +256,6 @@ function KanbanBoardContent({
     if (!selectedIssueKey) return null
     return issues.find((i) => i.key.toUpperCase() === selectedIssueKey.toUpperCase()) || null
   }, [selectedIssueKey, issues])
-
-  const handleOpenDrawer = (key: string) => {
-    setSelectedIssueKey(key)
-  }
-
-  const handleCloseDrawer = () => {
-    setSelectedIssueKey(null)
-  }
 
   const doneCol = useMemo(
     () => columns.find((c) => c.name.toLowerCase() === 'done'),
