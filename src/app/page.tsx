@@ -27,7 +27,6 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
     console.error('Session retrieval error:', error)
   }
 
-  // Unauthenticated users land on Login screen
   if (!session) {
     return <LandingPage />
   }
@@ -40,7 +39,6 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
       ? 'reports'
       : 'board'
 
-  // Fetch full user record including primary team assignment and team member linkages
   const currentUser = await prisma.user.findUnique({
     where: { id: session.userId },
     include: {
@@ -48,17 +46,12 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
     },
   })
 
-  // Fetch all organization projects for the left sidebar navigation
   const orgProjects = await prisma.project.findMany({
     where: session.orgId ? { organizationId: session.orgId } : undefined,
     select: { id: true, key: true, name: true },
     orderBy: { createdAt: 'asc' },
   })
 
-  // Active Project Selection Hierarchy:
-  // 1. Explicitly clicked in sidebar (?projectId=...)
-  // 2. User's primary aligned team board (defaultProjectId)
-  // 3. First board available in the organization
   const requestedProjectId = params.projectId
   const activeProjectId =
     requestedProjectId ||
@@ -77,7 +70,6 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
     })
   }
 
-  // Fallback if the selected project wasn't found
   if (!project && orgProjects.length > 0) {
     project = await prisma.project.findFirst({
       where: session.orgId ? { organizationId: session.orgId } : undefined,
@@ -89,14 +81,11 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
     })
   }
 
-  // Permission Resolution:
-  // - Super Admin & Org Admin have full edit rights across all boards.
-  // - Developers, QA, PO, and SM have full edit rights on their assigned primary board (or if added to projectMembers).
-  // - On all other boards, they are in Read-Only Mode (can inspect tickets, open drawers, and add comments).
   const isPrivilegedAdmin = session.systemRole === 'SUPER_ADMIN' || session.orgRole === 'ORG_ADMIN'
   const isAssignedMember =
     currentUser?.defaultProjectId === project?.id ||
-    currentUser?.projectMembers.some((pm) => pm.projectId === project?.id)
+    currentUser?.projectMembers.some((pm) => pm.projectId === project?.id) ||
+    project?.members.some((m) => m.userId === session.userId)
 
   const isReadOnly = !isPrivilegedAdmin && !isAssignedMember
 
@@ -127,7 +116,6 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
 
   return (
     <div className="flex min-h-screen bg-slate-50 text-slate-800">
-      {/* Collapsible Left Navigation Sidebar with Team Search */}
       <BoardSidebar
         projects={orgProjects}
         currentProjectId={project?.id || ''}
@@ -135,7 +123,6 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
         userRole={session.orgRole || session.systemRole}
       />
 
-      {/* Main Board Canvas */}
       <main className="flex-1 min-w-0 p-6 md:p-8">
         <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -204,7 +191,6 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
               </div>
             )}
 
-            {/* Issue creation restricted on foreign boards */}
             {!isReadOnly && project && (
               <CreateIssueModal
                 projectId={project.id}
