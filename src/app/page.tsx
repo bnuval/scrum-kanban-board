@@ -3,14 +3,16 @@ import LandingPage from '@/components/LandingPage'
 import KanbanBoard from '@/components/KanbanBoard'
 import BacklogView from '@/components/BacklogView'
 import SprintReportsView from '@/components/SprintReportsView'
+import PIPlanningView from '@/components/PIPlanningView'
 import CreateIssueModal from '@/components/CreateIssueModal'
 import OrgAdminModal from '@/components/OrgAdminModal'
 import BoardSidebar from '@/components/BoardSidebar'
 import SprintHeader from '@/components/SprintHeader'
 import Link from 'next/link'
-import { LayoutGrid, ListTodo, BarChart3, LogOut, Shield, Eye, FolderPlus } from 'lucide-react'
+import { LayoutGrid, ListTodo, BarChart3, CalendarRange, LogOut, Shield, Eye, FolderPlus } from 'lucide-react'
 import { logoutAction } from '@/app/auth-actions'
 import { prisma } from '@/lib/prisma'
+import { IssueType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,6 +39,8 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
       ? 'backlog'
       : params.view === 'reports'
       ? 'reports'
+      : params.view === 'pi-planning'
+      ? 'pi-planning'
       : 'board'
 
   const currentUser = await prisma.user.findUnique({
@@ -100,6 +104,19 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
       })
     : []
 
+  // Fetch all features scoped to the organization for SAFe PI Planning & Program Board
+  const piFeatures = await prisma.issue.findMany({
+    where: {
+      type: IssueType.FEATURE,
+      project: session.orgId ? { organizationId: session.orgId } : undefined,
+    },
+    include: {
+      planBaselines: { orderBy: { createdAt: 'desc' }, take: 1 },
+      children: true,
+    },
+    orderBy: { createdAt: 'asc' },
+  })
+
   const allUsers = await prisma.user.findMany({
     select: { id: true, name: true, avatarUrl: true },
   })
@@ -116,6 +133,7 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
 
   return (
     <div className="flex min-h-screen bg-slate-50 text-slate-800">
+      {/* Team Navigation Sidebar with Search */}
       <BoardSidebar
         projects={orgProjects}
         currentProjectId={project?.id || ''}
@@ -123,6 +141,7 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
         userRole={session.orgRole || session.systemRole}
       />
 
+      {/* Main Workspace */}
       <main className="flex-1 min-w-0 p-6 md:p-8">
         <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -180,6 +199,16 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
                 </Link>
 
                 <Link
+                  href={`?projectId=${project.id}&view=pi-planning`}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                    activeView === 'pi-planning' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <CalendarRange className="w-3.5 h-3.5" />
+                  PI Planning
+                </Link>
+
+                <Link
                   href={`?projectId=${project.id}&view=reports`}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
                     activeView === 'reports' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
@@ -218,7 +247,7 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
             <div>
               <h3 className="text-base font-bold text-slate-900">No Projects Configured</h3>
               <p className="text-xs text-slate-500 mt-1">
-                Your organization does not have an active board yet. Use the Team & Boards modal to initialize one.
+                Your organization does not have an active board yet. Use the Team &amp; Boards modal to initialize one.
               </p>
             </div>
             {session.systemRole === 'SUPER_ADMIN' && (
@@ -232,12 +261,14 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
           </div>
         ) : (
           <>
-            <SprintHeader
-              projectId={project.id}
-              activeSprint={activeSprint}
-              totalIssues={boardIssues.length}
-              completedIssues={completedCount}
-            />
+            {activeView !== 'pi-planning' && (
+              <SprintHeader
+                projectId={project.id}
+                activeSprint={activeSprint}
+                totalIssues={boardIssues.length}
+                completedIssues={completedCount}
+              />
+            )}
 
             {activeView === 'board' && (
               <KanbanBoard
@@ -255,6 +286,15 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
                 sprints={project.sprints as any}
                 allIssues={allIssues as any}
                 columns={project.columns.map((c) => ({ id: c.id, name: c.name }))}
+                isReadOnly={isReadOnly}
+              />
+            )}
+
+            {activeView === 'pi-planning' && (
+              <PIPlanningView
+                features={piFeatures as any}
+                teams={orgProjects}
+                orgId={session.orgId || ''}
                 isReadOnly={isReadOnly}
               />
             )}
