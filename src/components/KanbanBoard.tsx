@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo, Suspense } from 'react'
-import Link from 'next/link'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd'
 import {
   CheckCircle2,
@@ -14,8 +13,6 @@ import {
   ArrowDown,
   Minus,
   Search,
-  User,
-  X,
   ChevronDown,
   ChevronRight,
   CheckCheck,
@@ -125,13 +122,14 @@ function KanbanBoardContent({
   currentUserId,
 }: KanbanBoardProps) {
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const selectedKeyFromUrl = searchParams.get('selectedIssue')
 
   const [issues, setIssues] = useState<Issue[]>(initialIssues)
   const [activeCollaborators, setActiveCollaborators] = useState<PresenceUser[]>([])
   const [collapsedEpics, setCollapsedEpics] = useState<Record<string, boolean>>({})
   const [isMounted, setIsMounted] = useState(false)
+
+  // ⚡ FIX 1: Instant Client-Side Drawer State (Zero Server Trip / Zero URL Stutter)
+  const [selectedIssueKey, setSelectedIssueKey] = useState<string | null>(null)
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState('')
@@ -164,7 +162,7 @@ function KanbanBoardContent({
       },
     })
 
-    // 1. Listen for remote database updates on Issue
+    // Listen for remote database updates on Issue
     channel.on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'Issue' },
@@ -196,7 +194,7 @@ function KanbanBoardContent({
       }
     )
 
-    // 2. Track multi-user online presence
+    // Track multi-user online presence
     channel
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState()
@@ -225,29 +223,22 @@ function KanbanBoardContent({
     }
   }, [currentUserId, users, router])
 
+  // ⚡ FIX 1: Instant Issue Lookup via React State
   const selectedIssue = useMemo(() => {
-    if (!selectedKeyFromUrl) return null
-    return issues.find((i) => i.key.toUpperCase() === selectedKeyFromUrl.toUpperCase()) || null
-  }, [selectedKeyFromUrl, issues])
+    if (!selectedIssueKey) return null
+    return issues.find((i) => i.key.toUpperCase() === selectedIssueKey.toUpperCase()) || null
+  }, [selectedIssueKey, issues])
 
   const handleOpenDrawer = (key: string) => {
-    const params = new URLSearchParams(searchParams.toString())
-    params.set('selectedIssue', key)
-    router.push(`?${params.toString()}`, { scroll: false })
+    setSelectedIssueKey(key) // ⚡ Instant 0ms open
   }
 
   const handleCloseDrawer = () => {
-    const params = new URLSearchParams(searchParams.toString())
-    params.delete('selectedIssue')
-    router.push(`?${params.toString()}`, { scroll: false })
+    setSelectedIssueKey(null) // ⚡ Instant 0ms close
   }
 
   const doneCol = useMemo(
     () => columns.find((c) => c.name.toLowerCase() === 'done'),
-    [columns]
-  )
-  const inProgressCol = useMemo(
-    () => columns.find((c) => c.name.toLowerCase() === 'in progress'),
     [columns]
   )
 
@@ -271,18 +262,18 @@ function KanbanBoardContent({
     })
   }, [issues, searchQuery, typeFilter, priorityFilter, selectedAssigneeId, onlyMyIssues, currentUserId])
 
-  const handleStoryStatusChange = async (storyId: string, newColId: string) => {
+  const handleStoryStatusChange = (storyId: string, newColId: string) => {
     setIssues((prev) =>
       prev.map((item) => (item.id === storyId ? { ...item, columnId: newColId } : item))
     )
-    await updateIssuePosition(storyId, newColId, 1)
+    updateIssuePosition(storyId, newColId, 1).catch(console.error)
   }
 
-  const handleTagStoryToFeature = async (storyId: string, featureId: string | null) => {
+  const handleTagStoryToFeature = (storyId: string, featureId: string | null) => {
     setIssues((prev) =>
       prev.map((item) => (item.id === storyId ? { ...item, parentId: featureId } : item))
     )
-    await updateIssueParent(storyId, featureId)
+    updateIssueParent(storyId, featureId).catch(console.error)
   }
 
   const hierarchyTree = useMemo(() => {
@@ -348,7 +339,7 @@ function KanbanBoardContent({
     }
   }, [issues, filteredIssues])
 
-  const onDragEnd = async (result: DropResult) => {
+  const onDragEnd = (result: DropResult) => {
     const { destination, source, draggableId } = result
     if (!destination) return
     if (destination.droppableId === source.droppableId && destination.index === source.index) return
@@ -379,8 +370,9 @@ function KanbanBoardContent({
       }
     }
 
+    // ⚡ Non-blocking optimistic update
     setIssues(updatedList)
-    await updateIssuePosition(draggableId, destColumnId, destination.index + 1, targetParentId)
+    updateIssuePosition(draggableId, destColumnId, destination.index + 1, targetParentId).catch(console.error)
   }
 
   const toggleEpic = (id: string) => {
@@ -613,11 +605,7 @@ function KanbanBoardContent({
 
           <div className="flex items-center -space-x-1.5" title="Connected Collaborators">
             {activeCollaborators.map((c) => (
-              <div
-                key={c.userId}
-                className="relative group"
-                title={c.name}
-              >
+              <div key={c.userId} className="relative group" title={c.name}>
                 {c.avatarUrl ? (
                   <img
                     src={c.avatarUrl}
@@ -678,7 +666,7 @@ function KanbanBoardContent({
                         e.stopPropagation()
                         handleOpenDrawer(epic.key)
                       }}
-                      className="font-mono text-xs font-bold text-purple-700 hover:underline"
+                      className="font-mono text-xs font-bold text-purple-700 hover:underline cursor-pointer"
                     >
                       {epic.key}
                     </span>

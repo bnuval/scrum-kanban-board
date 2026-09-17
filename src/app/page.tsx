@@ -16,10 +16,23 @@ interface PageProps {
 async function getBoardData() {
   const project = await prisma.project.findUnique({
     where: { key: 'SCRUM' },
-    include: {
-      members: { include: { user: true } },
-      sprints: { orderBy: { createdAt: 'asc' } },
-      columns: { orderBy: { order: 'asc' } },
+    select: {
+      id: true,
+      key: true,
+      name: true,
+      sprints: {
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, name: true, status: true, startDate: true, endDate: true },
+      },
+      columns: {
+        orderBy: { order: 'asc' },
+        select: { id: true, name: true, order: true },
+      },
+      members: {
+        select: {
+          user: { select: { id: true, name: true, avatarUrl: true } },
+        },
+      },
     },
   })
 
@@ -28,35 +41,26 @@ async function getBoardData() {
   const allIssues = await prisma.issue.findMany({
     where: { projectId: project.id },
     orderBy: { order: 'asc' },
-    include: {
-      assignee: true,
+    select: {
+      id: true,
+      key: true,
+      title: true,
+      description: true,
+      type: true,
+      priority: true,
+      order: true,
+      columnId: true,
+      storyPoints: true,
+      parentId: true,
+      sprintId: true,
       column: { select: { name: true } },
-      parent: { select: { id: true, key: true, title: true, type: true } },
-      children: {
-        orderBy: { createdAt: 'asc' },
-        include: {
-          assignee: true,
-          parent: { select: { id: true, key: true, title: true, type: true } },
-        },
-      },
-      outgoingLinks: {
-        include: {
-          target: { select: { id: true, key: true, title: true, type: true, isCompleted: true } },
-        },
-      },
-      incomingLinks: {
-        include: {
-          source: { select: { id: true, key: true, title: true, type: true, isCompleted: true } },
-        },
-      },
-      comments: {
-        include: { user: true },
-        orderBy: { createdAt: 'desc' },
-      },
+      assignee: { select: { id: true, name: true, avatarUrl: true } },
     },
   })
 
-  const allUsers = await prisma.user.findMany()
+  const allUsers = await prisma.user.findMany({
+    select: { id: true, name: true, avatarUrl: true },
+  })
 
   return { project, allUsers, allIssues }
 }
@@ -75,7 +79,7 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
   if (!data || !data.project) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500 text-sm">
-        No active Scrum project found. Please run your seed script.
+        No active Scrum project found. Please check your database.
       </div>
     )
   }
@@ -83,7 +87,6 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
   const { project, allUsers, allIssues } = data
   const activeSprint = project.sprints.find((s) => s.status === 'ACTIVE')
 
-  // In the active board view, show only issues assigned to the active sprint (or all if no sprint is active)
   const boardIssues = activeSprint
     ? allIssues.filter((i) => i.sprintId === activeSprint.id)
     : allIssues
@@ -108,7 +111,6 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
           <h1 className="mt-1 text-2xl font-bold text-slate-900">{project.name}</h1>
         </div>
 
-        {/* View Switcher: Board vs Backlog vs Reports */}
         <div className="flex items-center gap-3">
           <div className="flex bg-slate-200/80 p-1 rounded-lg">
             <Link
@@ -155,7 +157,6 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
         </div>
       </header>
 
-      {/* Active Sprint Header Tracker */}
       <SprintHeader
         projectId={project.id}
         activeSprint={activeSprint}
@@ -163,7 +164,6 @@ export default async function ScrumProjectPage({ searchParams }: PageProps) {
         completedIssues={completedCount}
       />
 
-      {/* Main Body View */}
       {activeView === 'board' && (
         <KanbanBoard
           columns={project.columns}

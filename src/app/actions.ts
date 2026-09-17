@@ -4,20 +4,16 @@ import { prisma } from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { IssuePriority, IssueType, LinkType } from '@prisma/client'
 
-// Internal hierarchy matrix (kept private so Next.js doesn't treat non-async objects as server actions)
 const ALLOWED_CHILD_TYPES: Record<IssueType, IssueType[]> = {
   EPIC: [IssueType.FEATURE, IssueType.STORY, IssueType.BUG],
   FEATURE: [IssueType.STORY, IssueType.BUG],
   STORY: [IssueType.TASK, IssueType.BUG],
   BUG: [IssueType.TASK],
-  TASK: [], // Terminal work item
+  TASK: [],
 }
 
 /**
- * Updates issue column position, order, and optional cross-story parent assignment.
- * Automatically executes cascading completion:
- * - If all sibling tasks/bugs under a parent story become 'Done', the parent story transitions to 'Done'.
- * - If any child leaves 'Done', the parent story reverts to 'In Progress'.
+ * Fast issue position update. UI updates optimistically; no blocking page revalidation.
  */
 export async function updateIssuePosition(
   issueId: string,
@@ -42,24 +38,25 @@ export async function updateIssuePosition(
         parent: {
           include: {
             children: {
-              include: { column: true },
+              select: { id: true, columnId: true },
             },
           },
         },
-        column: true,
       },
     })
 
-    // Auto-progress / Auto-close logic for parent story
+    // Cascading parent story auto-completion
     if (updatedIssue.parent && updatedIssue.parent.children.length > 0) {
       const parent = updatedIssue.parent
       const allSiblings = parent.children
 
       const doneCol = await prisma.column.findFirst({
         where: { projectId: parent.projectId, name: { equals: 'Done', mode: 'insensitive' } },
+        select: { id: true },
       })
       const inProgressCol = await prisma.column.findFirst({
         where: { projectId: parent.projectId, name: { equals: 'In Progress', mode: 'insensitive' } },
+        select: { id: true },
       })
 
       if (doneCol) {
@@ -81,7 +78,6 @@ export async function updateIssuePosition(
       }
     }
 
-    revalidatePath('/')
     return { success: true }
   } catch (error) {
     console.error('Failed to update issue position:', error)
@@ -90,13 +86,19 @@ export async function updateIssuePosition(
 }
 
 /**
- * Re-tag or assign an existing issue to a new parent (e.g. tag Story to Feature/Epic, or Bug to Story).
+ * Re-parent an issue (Story -> Feature, Bug -> Story, etc.)
  */
 export async function updateIssueParent(issueId: string, parentId: string | null) {
   try {
     if (parentId) {
-      const parent = await prisma.issue.findUnique({ where: { id: parentId } })
-      const child = await prisma.issue.findUnique({ where: { id: issueId } })
+      const parent = await prisma.issue.findUnique({
+        where: { id: parentId },
+        select: { id: true, type: true },
+      })
+      const child = await prisma.issue.findUnique({
+        where: { id: issueId },
+        select: { id: true, type: true },
+      })
 
       if (!parent || !child) throw new Error('Issue not found')
       if (parent.id === child.id) throw new Error('Cannot parent an issue to itself')
@@ -112,7 +114,6 @@ export async function updateIssueParent(issueId: string, parentId: string | null
       data: { parentId: parentId || null },
     })
 
-    revalidatePath('/')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to update parent:', error)
@@ -121,16 +122,27 @@ export async function updateIssueParent(issueId: string, parentId: string | null
 }
 
 /**
- * Move or assign an issue directly to a specific sprint or to the backlog (null).
+ * Fast subtask completion toggle without full-page revalidation.
  */
+export async function toggleSubtaskCompletion(subtaskId: string, isCompleted: boolean) {
+  try {
+    await prisma.issue.update({
+      where: { id: subtaskId },
+      data: { isCompleted },
+    })
+    return { success: true }
+  } catch (error) {
+    console.error('Failed to toggle completion:', error)
+    return { success: false, error: 'Failed to update issue' }
+  }
+}
+
 export async function assignIssueSprint(issueId: string, sprintId: string | null) {
   try {
     await prisma.issue.update({
       where: { id: issueId },
       data: { sprintId: sprintId || null },
     })
-
-    revalidatePath('/')
     return { success: true }
   } catch (error) {
     console.error('Failed to assign sprint:', error)
@@ -138,9 +150,6 @@ export async function assignIssueSprint(issueId: string, sprintId: string | null
   }
 }
 
-/**
- * Update core issue details from the Drawer or Detail page.
- */
 export async function updateIssueDetails(formData: {
   issueId: string
   title: string
@@ -174,9 +183,6 @@ export async function updateIssueDetails(formData: {
   }
 }
 
-/**
- * Creates a new issue.
- */
 export async function createIssue(formData: {
   title: string
   description?: string
@@ -234,9 +240,6 @@ export async function createIssue(formData: {
   }
 }
 
-/**
- * Creates a child item strictly under an allowed parent.
- */
 export async function createChildIssue(formData: {
   parentId: string
   title: string
@@ -292,26 +295,6 @@ export async function createChildIssue(formData: {
   }
 }
 
-/**
- * Toggles a child task's completion checkbox.
- */
-export async function toggleSubtaskCompletion(subtaskId: string, isCompleted: boolean) {
-  try {
-    await prisma.issue.update({
-      where: { id: subtaskId },
-      data: { isCompleted },
-    })
-    revalidatePath('/')
-    return { success: true }
-  } catch (error) {
-    console.error('Failed to toggle completion:', error)
-    return { success: false, error: 'Failed to update issue' }
-  }
-}
-
-/**
- * Synchronizes draft/staged issue links when clicking 'Save Changes'.
- */
 export async function syncIssueLinks(
   sourceId: string,
   targetKeysToAdd: string[],
@@ -359,9 +342,6 @@ export async function syncIssueLinks(
   }
 }
 
-/**
- * Directly links two issues.
- */
 export async function linkIssues(
   sourceId: string,
   targetKey: string,
@@ -406,9 +386,6 @@ export async function linkIssues(
   }
 }
 
-/**
- * Removes an existing issue link.
- */
 export async function removeIssueLink(linkId: string) {
   try {
     await prisma.issueLink.delete({ where: { id: linkId } })
@@ -419,9 +396,6 @@ export async function removeIssueLink(linkId: string) {
   }
 }
 
-/**
- * Deletes an issue.
- */
 export async function deleteIssue(issueId: string) {
   try {
     await prisma.comment.deleteMany({ where: { issueId } })
@@ -434,9 +408,6 @@ export async function deleteIssue(issueId: string) {
   }
 }
 
-/**
- * Posts a comment to an issue.
- */
 export async function addComment(issueId: string, body: string) {
   try {
     const user = await prisma.user.findFirst()
@@ -453,9 +424,6 @@ export async function addComment(issueId: string, body: string) {
   }
 }
 
-/**
- * Completes a sprint and optionally rolls over incomplete tickets to a target sprint or backlog.
- */
 export async function completeSprint(sprintId: string, rollOverSprintId?: string | null) {
   try {
     const currentSprint = await prisma.sprint.findUnique({
@@ -494,9 +462,6 @@ export async function completeSprint(sprintId: string, rollOverSprintId?: string
   }
 }
 
-/**
- * Creates a new planned sprint.
- */
 export async function createSprint(projectId: string, name: string) {
   try {
     const sprintCount = await prisma.sprint.count({ where: { projectId } })
@@ -515,9 +480,6 @@ export async function createSprint(projectId: string, name: string) {
   }
 }
 
-/**
- * Starts a planned sprint and marks other active sprints as completed.
- */
 export async function startSprint(sprintId: string) {
   try {
     const sprint = await prisma.sprint.findUnique({ where: { id: sprintId } })
@@ -545,9 +507,6 @@ export async function startSprint(sprintId: string) {
   }
 }
 
-/**
- * Returns analytical metrics and workload breakdown for reports.
- */
 export async function getSprintReportData(sprintId: string) {
   try {
     const sprint = await prisma.sprint.findUnique({
