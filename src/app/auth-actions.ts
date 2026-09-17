@@ -6,9 +6,6 @@ import bcrypt from 'bcryptjs'
 import { revalidatePath } from 'next/cache'
 import { OrgRole, SystemRole } from '@prisma/client'
 
-/**
- * Universal User Login Action
- */
 export async function loginAction(formData: { usernameOrEmail: string; password: string }) {
   try {
     const user = await prisma.user.findFirst({
@@ -57,16 +54,10 @@ export async function loginAction(formData: { usernameOrEmail: string; password:
   }
 }
 
-/**
- * User Logout Action
- */
 export async function logoutAction() {
   await logout()
 }
 
-/**
- * Super Admin Action: Create Organization
- */
 export async function createOrganizationAction(name: string, slug: string) {
   const session = await getSession()
   if (!session || session.systemRole !== 'SUPER_ADMIN') {
@@ -97,10 +88,6 @@ export async function createOrganizationAction(name: string, slug: string) {
   }
 }
 
-/**
- * Super Admin Action: Provision Organization Admin (SM / Project Manager)
- * STRICT RULE: Always creates a USER with role ORG_ADMIN. Cannot create another SUPER_ADMIN.
- */
 export async function provisionOrgAdminAction(data: {
   username: string
   email: string
@@ -155,15 +142,13 @@ export async function provisionOrgAdminAction(data: {
   }
 }
 
-/**
- * Org Admin (SM / PM) Action: Provision team members (PO, SM, DEV, QA) within their own organization
- */
 export async function provisionTeamMemberAction(data: {
   username: string
   email: string
   password: string
   name: string
   role: 'PO' | 'SM' | 'DEV' | 'QA'
+  projectId: string
 }) {
   const session = await getSession()
   if (!session || !session.orgId || session.orgRole !== 'ORG_ADMIN') {
@@ -193,6 +178,7 @@ export async function provisionTeamMemberAction(data: {
         passwordHash: hash,
         name: data.name.trim(),
         systemRole: SystemRole.USER,
+        defaultProjectId: data.projectId,
       },
     })
 
@@ -204,6 +190,13 @@ export async function provisionTeamMemberAction(data: {
       },
     })
 
+    await prisma.projectMember.create({
+      data: {
+        userId: user.id,
+        projectId: data.projectId,
+      },
+    })
+
     revalidatePath('/')
     return { success: true }
   } catch (err: any) {
@@ -212,9 +205,6 @@ export async function provisionTeamMemberAction(data: {
   }
 }
 
-/**
- * Org Admin (SM / PM) Action: Create a new Board / Project for their Organization
- */
 export async function createProjectBoardAction(name: string, key: string) {
   const session = await getSession()
   if (!session || !session.orgId || (session.orgRole !== 'ORG_ADMIN' && session.systemRole !== 'SUPER_ADMIN')) {

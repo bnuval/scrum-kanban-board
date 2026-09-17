@@ -3,21 +3,26 @@
 import { useState } from 'react'
 import { provisionTeamMemberAction, createProjectBoardAction } from '@/app/auth-actions'
 import { useRouter } from 'next/navigation'
-import { UserPlus, PlusSquare, X } from 'lucide-react'
+import { UserPlus, X } from 'lucide-react'
 
-export default function OrgAdminModal() {
+interface ProjectOption {
+  id: string
+  name: string
+  key: string
+}
+
+export default function OrgAdminModal({ projects = [] }: { projects: ProjectOption[] }) {
   const router = useRouter()
   const [isOpen, setIsOpen] = useState(false)
   const [tab, setTab] = useState<'users' | 'boards'>('users')
 
-  // User form
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState<'DEV' | 'QA' | 'PO' | 'SM'>('DEV')
+  const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.id || '')
 
-  // Board form
   const [boardName, setBoardName] = useState('')
   const [boardKey, setBoardKey] = useState('')
 
@@ -27,13 +32,27 @@ export default function OrgAdminModal() {
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    const res = await provisionTeamMemberAction({ username, email, name, password, role })
+    const targetProj = selectedProjectId || projects[0]?.id
+    if (!targetProj) {
+      setError('Please create a project board first before adding team members.')
+      return
+    }
+
+    const res = await provisionTeamMemberAction({
+      username,
+      email,
+      name,
+      password,
+      role,
+      projectId: targetProj,
+    })
+
     if (res.success) {
       setUsername('')
       setEmail('')
       setName('')
       setPassword('')
-      setMessage(`Added ${role} member successfully!`)
+      setMessage(`Added ${role} aligned to the selected team board!`)
       setTimeout(() => setMessage(''), 3000)
       router.refresh()
     } else {
@@ -62,6 +81,7 @@ export default function OrgAdminModal() {
   if (!isOpen) {
     return (
       <button
+        type="button"
         onClick={() => setIsOpen(true)}
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white transition cursor-pointer"
       >
@@ -90,7 +110,7 @@ export default function OrgAdminModal() {
               Create New Board
             </button>
           </div>
-          <button onClick={() => setIsOpen(false)} className="text-slate-400 hover:text-slate-600">
+          <button type="button" onClick={() => setIsOpen(false)} className="text-slate-400 hover:text-slate-600">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -136,6 +156,23 @@ export default function OrgAdminModal() {
                 className="p-2 border rounded border-slate-300"
               />
             </div>
+
+            <div>
+              <label className="block text-[11px] text-slate-500 mb-1 font-semibold">Assign to Team Board</label>
+              <select
+                value={selectedProjectId || (projects[0]?.id ?? '')}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                className="w-full p-2 border rounded border-slate-300 font-semibold"
+                required
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.key})
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div>
               <label className="block text-[11px] text-slate-500 mb-1 font-semibold">Select Member Role</label>
               <select
@@ -143,12 +180,13 @@ export default function OrgAdminModal() {
                 onChange={(e) => setRole(e.target.value as any)}
                 className="w-full p-2 border rounded border-slate-300"
               >
-                <option value="DEV">Developer (Create Stories, Move Tasks, Complete Subtasks)</option>
-                <option value="QA">Quality Assurance (Log Bugs, Verify Stories, Move Columns)</option>
-                <option value="PO">Product Owner (Manage Epics, Features, Prioritize Sprints)</option>
-                <option value="SM">Scrum Master (Manage Sprints, Assign Tickets)</option>
+                <option value="DEV">Developer (Full edit on team board)</option>
+                <option value="QA">Quality Assurance (Log Bugs & verify on team board)</option>
+                <option value="PO">Product Owner (Sprint prioritization on team board)</option>
+                <option value="SM">Scrum Master (Manage Sprints on team board)</option>
               </select>
             </div>
+
             <button
               type="submit"
               className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded cursor-pointer"
@@ -163,7 +201,7 @@ export default function OrgAdminModal() {
               <input
                 type="text"
                 required
-                placeholder="e.g. Core Checkout ART"
+                placeholder="e.g. Payments ART"
                 value={boardName}
                 onChange={(e) => setBoardName(e.target.value)}
                 className="w-full p-2 border rounded border-slate-300"
@@ -174,7 +212,7 @@ export default function OrgAdminModal() {
               <input
                 type="text"
                 required
-                placeholder="e.g. CART"
+                placeholder="e.g. PAY"
                 value={boardKey}
                 onChange={(e) => setBoardKey(e.target.value)}
                 className="w-full p-2 border rounded border-slate-300 uppercase"
