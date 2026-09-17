@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronRight,
   Search,
+  Lock,
 } from 'lucide-react'
 import {
   createSprint,
@@ -58,6 +59,7 @@ interface BacklogViewProps {
   sprints: Sprint[]
   allIssues: Issue[]
   columns: Column[]
+  isReadOnly?: boolean
 }
 
 function PriorityIcon({ priority }: { priority: string }) {
@@ -96,12 +98,11 @@ export default function BacklogView({
   sprints,
   allIssues: initialIssues,
   columns,
+  isReadOnly = false,
 }: BacklogViewProps) {
   const [issues, setIssues] = useState<Issue[]>(initialIssues)
   const [searchQuery, setSearchQuery] = useState('')
   const [collapsedSprints, setCollapsedSprints] = useState<Record<string, boolean>>({})
-
-  // ⚡ Fast local state for Drawer
   const [selectedIssueKey, setSelectedIssueKey] = useState<string | null>(null)
 
   const selectedIssue = useMemo(() => {
@@ -109,13 +110,8 @@ export default function BacklogView({
     return issues.find((i) => i.key.toUpperCase() === selectedIssueKey.toUpperCase()) || null
   }, [selectedIssueKey, issues])
 
-  const handleOpenDrawer = (key: string) => {
-    setSelectedIssueKey(key)
-  }
-
-  const handleCloseDrawer = () => {
-    setSelectedIssueKey(null)
-  }
+  const handleOpenDrawer = (key: string) => setSelectedIssueKey(key)
+  const handleCloseDrawer = () => setSelectedIssueKey(null)
 
   const filteredIssues = useMemo(() => {
     if (!searchQuery.trim()) return issues
@@ -127,7 +123,6 @@ export default function BacklogView({
     )
   }, [issues, searchQuery])
 
-  // Group issues into sprints vs backlog pool
   const sprintMap = useMemo(() => {
     const map: Record<string, Issue[]> = {}
     sprints.forEach((s) => {
@@ -151,27 +146,20 @@ export default function BacklogView({
   }
 
   const handleMoveIssueSprint = async (issueId: string, newSprintId: string | null) => {
+    if (isReadOnly) return
     setIssues((prev) =>
       prev.map((i) => (i.id === issueId ? { ...i, sprintId: newSprintId } : i))
     )
-    await assignIssueSprint(issueId, newSprintId)
-  }
-
-  const handleCreateSprint = async () => {
-    const sprintCount = sprints.length + 1
-    await createSprint(projectId, `Sprint ${sprintCount}`)
-  }
-
-  const handleStartSprint = async (sprintId: string) => {
-    await startSprint(sprintId)
-  }
-
-  const handleCompleteSprint = async (sprintId: string) => {
-    await completeSprint(sprintId, null)
+    const res = await assignIssueSprint(issueId, newSprintId)
+    if (!res.success) {
+      alert(res.error || 'Failed to update iteration path')
+      setIssues(initialIssues)
+    }
   }
 
   const renderIssueRow = (issue: Issue) => {
     const column = columns.find((c) => c.id === issue.columnId)
+    const assignedSprint = sprints.find((s) => s.id === issue.sprintId)
 
     return (
       <div
@@ -192,19 +180,25 @@ export default function BacklogView({
         </div>
 
         <div className="flex items-center gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
-          {/* Quick Sprint Switcher Dropdown */}
-          <select
-            value={issue.sprintId || ''}
-            onChange={(e) => handleMoveIssueSprint(issue.id, e.target.value || null)}
-            className="text-[11px] bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-600 font-medium focus:outline-blue-500 cursor-pointer"
-          >
-            <option value="">Backlog</option>
-            {sprints.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name} ({s.status})
-              </option>
-            ))}
-          </select>
+          {/* If Read-Only: Show static label. If Full-Access: Show Interactive Dropdown */}
+          {isReadOnly ? (
+            <span className="text-[11px] bg-slate-100 border border-slate-200 text-slate-600 font-medium px-2 py-1 rounded">
+              {assignedSprint ? assignedSprint.name : 'Backlog'}
+            </span>
+          ) : (
+            <select
+              value={issue.sprintId || ''}
+              onChange={(e) => handleMoveIssueSprint(issue.id, e.target.value || null)}
+              className="text-[11px] bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-600 font-medium focus:outline-blue-500 cursor-pointer"
+            >
+              <option value="">Backlog</option>
+              {sprints.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} ({s.status})
+                </option>
+              ))}
+            </select>
+          )}
 
           {column && (
             <span className="text-[11px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded uppercase">
@@ -221,16 +215,6 @@ export default function BacklogView({
           )}
 
           <PriorityIcon priority={issue.priority} />
-
-          {issue.assignee ? (
-            <div className="w-6 h-6 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
-              {issue.assignee.name?.[0] ?? 'U'}
-            </div>
-          ) : (
-            <div className="w-6 h-6 rounded-full border border-dashed border-slate-300 flex items-center justify-center text-[10px] text-slate-400">
-              ?
-            </div>
-          )}
         </div>
       </div>
     )
@@ -238,6 +222,13 @@ export default function BacklogView({
 
   return (
     <div className="space-y-6">
+      {isReadOnly && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold">
+          <Lock className="w-4 h-4 shrink-0" />
+          Read-Only Mode: Sprint planning and iteration movement are restricted to the primary team members of this board.
+        </div>
+      )}
+
       {/* Header & Controls */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-lg border border-slate-200 shadow-xs">
         <div className="relative flex-1 max-w-md">
@@ -251,13 +242,17 @@ export default function BacklogView({
           />
         </div>
 
-        <button
-          onClick={handleCreateSprint}
-          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-xs font-semibold transition"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Create Sprint
-        </button>
+        {/* Hide Sprint Creation for Read-Only viewers */}
+        {!isReadOnly && (
+          <button
+            type="button"
+            onClick={() => createSprint(projectId, `Sprint ${sprints.length + 1}`)}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-xs font-semibold transition"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Create Sprint
+          </button>
+        )}
       </div>
 
       {/* Sprints Sections */}
@@ -297,26 +292,30 @@ export default function BacklogView({
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  {sprint.status === 'PLANNED' && (
-                    <button
-                      onClick={() => handleStartSprint(sprint.id)}
-                      className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-2.5 py-1 rounded transition"
-                    >
-                      <Play className="w-3 h-3" />
-                      Start Sprint
-                    </button>
-                  )}
-                  {sprint.status === 'ACTIVE' && (
-                    <button
-                      onClick={() => handleCompleteSprint(sprint.id)}
-                      className="flex items-center gap-1 bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold px-2.5 py-1 rounded transition"
-                    >
-                      <Check className="w-3 h-3" />
-                      Complete Sprint
-                    </button>
-                  )}
-                </div>
+                {!isReadOnly && (
+                  <div className="flex items-center gap-2">
+                    {sprint.status === 'PLANNED' && (
+                      <button
+                        type="button"
+                        onClick={() => startSprint(sprint.id)}
+                        className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-2.5 py-1 rounded transition"
+                      >
+                        <Play className="w-3 h-3" />
+                        Start Sprint
+                      </button>
+                    )}
+                    {sprint.status === 'ACTIVE' && (
+                      <button
+                        type="button"
+                        onClick={() => completeSprint(sprint.id, null)}
+                        className="flex items-center gap-1 bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold px-2.5 py-1 rounded transition"
+                      >
+                        <Check className="w-3 h-3" />
+                        Complete Sprint
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {!isCollapsed && (
@@ -333,30 +332,29 @@ export default function BacklogView({
           )
         })}
 
-        {/* Backlog / Unassigned Issues Section */}
+        {/* Backlog pool */}
         <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-4 shadow-xs space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-slate-900">
               Backlog ({sprintMap.backlogList.length} issues)
             </h2>
           </div>
-
           <div className="space-y-2">
             {sprintMap.backlogList.map((issue) => renderIssueRow(issue))}
             {sprintMap.backlogList.length === 0 && (
               <div className="p-6 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg bg-white">
-                Your backlog is completely empty!
+                Backlog is empty.
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* ⚡ Drawer renders directly inside BacklogView */}
       <IssueDetailDrawer
         issue={selectedIssue as any}
         allProjectIssues={issues as any}
         columns={columns}
+        isReadOnly={isReadOnly}
         onClose={handleCloseDrawer}
         onNavigateIssue={(key) => handleOpenDrawer(key)}
       />
