@@ -1,7 +1,7 @@
 'use server'
 
 import { prisma } from '@/lib/prisma'
-import { createSession, logout } from '@/lib/auth'
+import { createSession, logout, getSession } from '@/lib/auth'
 import bcrypt from 'bcryptjs'
 import { revalidatePath } from 'next/cache'
 import { OrgRole, SystemRole } from '@prisma/client'
@@ -46,6 +46,7 @@ export async function loginAction(formData: { usernameOrEmail: string; password:
     return {
       success: true,
       systemRole: user.systemRole,
+      orgRole: primaryMembership?.role,
     }
   } catch (error: any) {
     console.error('Login error:', error)
@@ -57,7 +58,15 @@ export async function logoutAction() {
   await logout()
 }
 
+/**
+ * Super Admin: Create Organization
+ */
 export async function createOrganizationAction(name: string, slug: string) {
+  const session = await getSession()
+  if (!session || session.systemRole !== 'SUPER_ADMIN') {
+    return { success: false, error: 'Unauthorized. Super Admin access required.' }
+  }
+
   try {
     const org = await prisma.organization.create({
       data: {
@@ -72,15 +81,22 @@ export async function createOrganizationAction(name: string, slug: string) {
   }
 }
 
-export async function createUserWithRoleAction(data: {
+/**
+ * Super Admin: Provision Org Admin (SM / Project Manager)
+ * RULE: No one is allowed to create another SUPER_ADMIN.
+ */
+export async function provisionOrgAdminAction(data: {
   username: string
   email: string
   password: string
   name: string
-  systemRole: SystemRole
-  organizationId?: string
-  orgRole?: OrgRole
+  organizationId: string
 }) {
+  const session = await getSession()
+  if (!session || session.systemRole !== 'SUPER_ADMIN') {
+    return { success: false, error: 'Unauthorized. Super Admin access required.' }
+  }
+
   try {
     const hash = await bcrypt.hash(data.password, 10)
 
@@ -90,23 +106,105 @@ export async function createUserWithRoleAction(data: {
         email: data.email.trim().toLowerCase(),
         passwordHash: hash,
         name: data.name.trim(),
-        systemRole: data.systemRole,
+        systemRole: SystemRole.USER, // STRICT: Always USER, never SUPER_ADMIN
       },
     })
 
-    if (data.organizationId && data.orgRole) {
-      await prisma.orgMember.create({
-        data: {
-          userId: user.id,
-          organizationId: data.organizationId,
-          role: data.orgRole,
-        },
-      })
-    }
+    await prisma.orgMember.create({
+      data: {
+        userId: user.id,
+        organizationId: data.organizationId,
+        role: OrgRole.ORG_ADMIN, // Assigned as the Org Lead / SM
+      },
+    })
 
     revalidatePath('/admin')
     return { success: true }
   } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to create user' }
+    return { success: false, error: err.message || 'Failed to provision Organization Admin' }
+  }
+}
+
+/**
+ * Org Admin (SM / PM): Provision team members inside their own Organization (PO, SM, DEV, QA)
+ */
+export async function provisionTeamMemberAction(data: {
+  username: string
+  email: string
+  password: string
+  name: string
+  role: 'PO' | 'SM' | 'DEV' | 'QA'
+}) {
+  const session = await getSession()
+  if (!session || !session.orgId || session.orgRole !== 'ORG_ADMIN') {
+    return { success: false, error: 'Unauthorized. Only Organization Admins can provision team members.' }
+  }
+
+  try {
+    const hash = await bcrypt.hash(data.password, 10)
+
+    const user = await prisma.user.create({
+      data: {
+        username: data.username.trim(),
+        email: data.email.trim().toLowerCase(),
+        passwordHash: hash,
+        name: data.name.trim(),
+        systemRole: SystemRole.USER,
+      },
+    })
+
+    await prisma.orgMember.create({
+      data: {
+        userId: user.id,
+        organizationId: session.orgId,
+        role: data.role as OrgRole,
+      },
+    })
+
+    revalidatePath('/')
+    return { success: true }
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to provision team member' }
+  }
+}
+
+/**
+ * Org Admin (SM / PM): Create a new Board / Project for their Organization
+ */
+export async function createProjectBoardAction(name: string, key: string) {
+  const session = await getSession()
+  if (!session || !session.orgId || (session.orgRole !== 'ORG_ADMIN' && session.systemRole !== 'SUPER_ADMIN')) {
+    return { success: false, error: 'Unauthorized. Only Organization Admins can create boards.' }
+  }
+
+  try {
+    const project = await prisma.project.create({
+      data: {
+        name: name.trim(),
+        key: key.trim().toUpperCase(),
+        organizationId: session.orgId,
+        columns: {
+          create: [
+            { name: 'To Do', order: 0 },
+            { name: 'In Progress', order: 1 },
+            { name: 'Testing', order: 2 },
+            { name: 'Done', order: 3 },
+          ],
+        },
+        sprints: {
+          create: {
+            name: 'Sprint 1',
+            status: 'ACTIVE',
+            startDate: new Date(),
+            endDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          },
+        },
+      },
+    })
+
+    revalidatePath('/')
+    return { success: true, project }
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to create board' }
   }
 }
