@@ -1,7 +1,18 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { X, Send, MessageSquare, Lock, Save, CheckCircle2, Share2, Check } from 'lucide-react'
+import {
+  X,
+  Send,
+  MessageSquare,
+  Lock,
+  Save,
+  CheckCircle2,
+  Share2,
+  Check,
+  ExternalLink,
+} from 'lucide-react'
+import Link from 'next/link'
 import { updateIssueDetails, addComment } from '@/app/actions'
 import { IssuePriority } from '@prisma/client'
 
@@ -52,7 +63,11 @@ export default function IssueDetailDrawer({
       setDescription(issue.description || '')
       setPriority(issue.priority || 'MEDIUM')
       setColumnId(issue.columnId || columns[0]?.id || '')
-      setStoryPoints(issue.storyPoints !== null && issue.storyPoints !== undefined ? issue.storyPoints : '')
+      setStoryPoints(
+        issue.storyPoints !== null && issue.storyPoints !== undefined
+          ? issue.storyPoints
+          : ''
+      )
       setAssigneeId(issue.assigneeId || issue.assignee?.id || '')
     }
   }, [issue, columns])
@@ -60,8 +75,9 @@ export default function IssueDetailDrawer({
   if (!issue) return null
 
   const handleCopyLink = () => {
-    if (typeof window !== 'undefined') {
-      navigator.clipboard.writeText(window.location.href)
+    if (typeof window !== 'undefined' && issue?.key) {
+      const standaloneUrl = `${window.location.origin}/browse/${issue.key}`
+      navigator.clipboard.writeText(standaloneUrl)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }
@@ -123,9 +139,15 @@ export default function IssueDetailDrawer({
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50/50">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-            {issue.key}
-          </span>
+          <Link
+            href={`/browse/${issue.key}`}
+            target="_blank"
+            title="Open in dedicated full page"
+            className="inline-flex items-center gap-1 font-mono text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 hover:bg-blue-100 transition"
+          >
+            <span>{issue.key}</span>
+            <ExternalLink className="w-3 h-3" />
+          </Link>
           <span className="text-[11px] font-semibold text-slate-500 uppercase">
             {issue.type}
           </span>
@@ -144,7 +166,7 @@ export default function IssueDetailDrawer({
           <button
             type="button"
             onClick={handleCopyLink}
-            title="Copy ticket URL"
+            title="Copy standalone share link"
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-semibold text-slate-600 hover:bg-slate-200 border border-slate-200 transition cursor-pointer"
           >
             {copied ? (
@@ -189,7 +211,7 @@ export default function IssueDetailDrawer({
         </div>
       </div>
 
-      {/* Form Body */}
+      {/* Body */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         <div>
           <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
@@ -308,7 +330,7 @@ export default function IssueDetailDrawer({
           </div>
         </div>
 
-        {/* Comments */}
+        {/* Comments Section */}
         <div className="space-y-4 pt-4 border-t border-slate-200">
           <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
             <MessageSquare className="w-4 h-4 text-blue-600" /> Comments & Activity
@@ -319,7 +341,7 @@ export default function IssueDetailDrawer({
               rows={2}
               value={commentText}
               onChange={(e) => setCommentText(e.target.value)}
-              placeholder="Leave feedback or reply..."
+              placeholder="Leave feedback or comment on this ticket..."
               className="w-full p-2.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500"
             />
             <button
